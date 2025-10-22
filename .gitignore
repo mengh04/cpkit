@@ -1,0 +1,31 @@
+# Rust
+/target
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.class
+*.pyc
+__pycache__/
+
+# Test files
+*.test
+test_*
+
+# Local data
+*.json
+!Cargo.toml
+!package.json
