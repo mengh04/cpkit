@@ -119,7 +119,94 @@ impl CPKitApp {
 
     /// 设置自定义字体
     fn setup_custom_fonts(ctx: &egui::Context) {
-        let fonts = egui::FontDefinitions::default();
+        let mut fonts = egui::FontDefinitions::default();
+
+        // 添加中文字体
+        // 方法1: 使用系统自带的中文字体（推荐）
+        #[cfg(target_os = "windows")]
+        {
+            // Windows 系统字体路径
+            if let Ok(font_data) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
+                fonts.font_data.insert(
+                    "microsoft_yahei".to_owned(),
+                    egui::FontData::from_owned(font_data),
+                );
+                // 将微软雅黑设置为默认字体的第一优先级
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .insert(0, "microsoft_yahei".to_owned());
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .insert(0, "microsoft_yahei".to_owned());
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS 系统字体路径
+            if let Ok(font_data) = std::fs::read("/System/Library/Fonts/PingFang.ttc") {
+                fonts
+                    .font_data
+                    .insert("pingfang".to_owned(), egui::FontData::from_owned(font_data));
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .insert(0, "pingfang".to_owned());
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .insert(0, "pingfang".to_owned());
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // Linux 系统字体路径（以 Noto Sans CJK 为例）
+            if let Ok(font_data) =
+                std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+            {
+                fonts.font_data.insert(
+                    "noto_sans_cjk".to_owned(),
+                    egui::FontData::from_owned(font_data),
+                );
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .insert(0, "noto_sans_cjk".to_owned());
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .insert(0, "noto_sans_cjk".to_owned());
+            }
+        }
+
+        // 方法2: 使用项目内嵌的字体文件
+        // 取消下面注释并将字体文件放到 fonts 目录
+        /*
+        if let Ok(font_data) = std::fs::read("fonts/SourceHanSansSC-Regular.otf") {
+            fonts.font_data.insert(
+                "source_han_sans".to_owned(),
+                egui::FontData::from_owned(font_data),
+            );
+            fonts.families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "source_han_sans".to_owned());
+            fonts.families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "source_han_sans".to_owned());
+        }
+        */
+
         ctx.set_fonts(fonts);
     }
 

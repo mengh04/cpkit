@@ -25,7 +25,7 @@ impl Toolbar {
                         ui.spinner();
                         ui.label(RichText::new("Running...").color(Color32::LIGHT_BLUE));
                     } else if has_problem {
-                        ui.label(RichText::new("✓ Ready").color(Color32::GREEN));
+                        ui.label(RichText::new("Ready").color(Color32::GREEN));
                     } else {
                         ui.label(RichText::new("Waiting...").color(Color32::GRAY));
                     }
