@@ -21,6 +21,7 @@ enum AppMessage {
 
 /// 问题数据（可跨线程传递）
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ProblemData {
     id: Uuid,
     name: String,
@@ -48,7 +49,6 @@ pub struct CPKitApp {
     pending_run_test_id: Option<Uuid>,
     pending_stop: bool,
     pending_add_test: bool,
-    pending_open_file: bool,
     pending_select_file: bool,
 
     // 消息通道
@@ -82,7 +82,6 @@ impl CPKitApp {
             pending_run_test_id: None,
             pending_stop: false,
             pending_add_test: false,
-            pending_open_file: false,
             pending_select_file: false,
             tx: tx.clone(),
             rx,
@@ -230,36 +229,16 @@ impl CPKitApp {
                     self.cached_current_id = id;
                     self.cached_tests = tests;
 
-                    // 当接收到新题目时，处理源文件
+                    // 当接收到新题目时，如果题目中保存了源文件路径，则恢复
+                    // 否则保留用户当前选择的源文件
                     if problem_changed && id.is_some() {
                         if let Some(saved_source) = problem_source_file {
-                            // 情况1: problem 中已保存源文件路径（手动选择的文件）
+                            // 从 problem 中恢复源文件路径
                             self.source_file = saved_source;
                             tracing::info!("从问题中恢复源文件: {}", self.source_file);
-                            // 不触发自动打开，因为是用户手动选择的
                         } else {
-                            // 情况2: problem 中没有源文件（Competitive Companion 接收的题目）
-                            if let Some(problem) =
-                                self.cached_problems.iter().find(|p| Some(p.id) == id)
-                            {
-                                // 生成安全的文件名（移除特殊字符）
-                                let safe_name = problem
-                                    .name
-                                    .chars()
-                                    .map(|c| match c {
-                                        '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-                                        _ => c,
-                                    })
-                                    .collect::<String>();
-                                self.source_file = format!("{}.cpp", safe_name);
-                                tracing::info!(
-                                    "新题目接收，自动设置源文件为: {}",
-                                    self.source_file
-                                );
-
-                                // 自动创建并打开文件
-                                self.pending_open_file = true;
-                            }
+                            // 新题目没有关联的源文件，保留用户当前选择的源文件
+                            tracing::info!("接收到新题目，保留当前源文件: {}", self.source_file);
                         }
                     }
 
@@ -529,43 +508,6 @@ impl CPKitApp {
         });
     }
 
-    /// 创建并打开源文件
-    fn create_and_open_file(&mut self) {
-        if self.source_file.is_empty() {
-            self.last_error = Some("没有设置源文件名".to_string());
-            return;
-        }
-
-        let source_path = PathBuf::from(&self.source_file);
-
-        // 如果文件不存在，创建空文件
-        if !source_path.exists() {
-            match std::fs::write(&source_path, "") {
-                Ok(_) => {
-                    tracing::info!("创建新文件: {}", self.source_file);
-                }
-                Err(e) => {
-                    self.last_error = Some(format!("创建文件失败: {}", e));
-                    return;
-                }
-            }
-        }
-
-        // 使用 zed 编辑器打开文件
-        match std::process::Command::new("zed").arg(&source_path).spawn() {
-            Ok(_) => {
-                tracing::info!("使用 zed 打开文件: {}", self.source_file);
-                self.last_error = None;
-            }
-            Err(e) => {
-                self.last_error = Some(format!(
-                    "打开编辑器失败: {}。请确保 zed 已安装并在 PATH 中",
-                    e
-                ));
-            }
-        }
-    }
-
     /// 选择已存在的源文件
     fn select_file(&mut self) {
         // 使用文件对话框让用户选择文件
@@ -779,12 +721,6 @@ impl eframe::App for CPKitApp {
             self.pending_stop = false;
             self.stop_signal.store(true, Ordering::Relaxed);
             self.is_running = false;
-        }
-
-        // 处理打开文件请求
-        if self.pending_open_file {
-            self.pending_open_file = false;
-            self.create_and_open_file();
         }
 
         // 处理选择文件请求

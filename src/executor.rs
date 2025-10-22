@@ -7,6 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 /// 代码执行器（仅支持 C++）
 pub struct Executor;
 
@@ -49,6 +52,13 @@ impl Executor {
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+        // 在 Windows 上隐藏控制台窗口
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
 
         let mut child = cmd.spawn().context("Cannot execute C++ compiler")?;
 
@@ -98,6 +108,13 @@ impl Executor {
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // 在 Windows 上隐藏控制台窗口
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
 
         let mut child = cmd
             .spawn()
