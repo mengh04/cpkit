@@ -93,19 +93,6 @@ pub enum TestStatus {
 }
 
 impl TestStatus {
-    pub fn icon(&self) -> &str {
-        match self {
-            TestStatus::Pending => "⏳",
-            TestStatus::Running => "▶",
-            TestStatus::Accepted => "✓",
-            TestStatus::WrongAnswer => "✗",
-            TestStatus::RuntimeError => "⚠",
-            TestStatus::TimeLimitExceeded => "⏱",
-            TestStatus::MemoryLimitExceeded => "💾",
-            TestStatus::CompilationError => "🔨",
-        }
-    }
-
     pub fn color(&self) -> egui::Color32 {
         match self {
             TestStatus::Pending => egui::Color32::GRAY,

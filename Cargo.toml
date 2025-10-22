@@ -38,6 +38,7 @@ thiserror = "1.0"
 # Utilities
 uuid = { version = "1.10", features = ["v4", "serde"] }
 rfd = "0.14"
+arboard = "3.4"
 
 [profile.release]
 opt-level = 3

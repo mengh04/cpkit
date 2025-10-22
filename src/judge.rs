@@ -1,32 +1,87 @@
 use crate::executor::Executor;
 use crate::models::{ExecutionResult, TestCase, TestStatus};
 use anyhow::Result;
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 /// 测试判断器
 pub struct Judge {
     executor: Executor,
+    compiled_executable: Option<PathBuf>,
 }
 
 impl Judge {
     pub fn new() -> Result<Self> {
         Ok(Self {
             executor: Executor::new()?,
+            compiled_executable: None,
         })
     }
 
-    /// 判断单个测试用例
+    /// 编译一次，返回可执行文件路径
+    pub fn compile_once(
+        &mut self,
+        source_file: &Path,
+        stop_signal: Option<Arc<AtomicBool>>,
+    ) -> Result<()> {
+        // 如果已经编译过，先清理
+        if self.compiled_executable.is_some() {
+            self.cleanup();
+        }
+
+        match self.executor.compile(source_file, stop_signal) {
+            Ok(exe) => {
+                self.compiled_executable = Some(exe);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// 使用已编译的可执行文件运行单个测试
+    pub async fn run_test(
+        &self,
+        test: &mut TestCase,
+        stop_signal: Option<Arc<AtomicBool>>,
+    ) -> Result<()> {
+        test.status = TestStatus::Running;
+
+        let executable = self
+            .compiled_executable
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No compiled executable found"))?;
+
+        // 执行代码
+        let result = self
+            .executor
+            .execute(executable, &test.input, stop_signal)?;
+
+        // 更新测试结果
+        self.update_test_from_result(test, result);
+
+        Ok(())
+    }
+
+    /// 清理编译产物
+    pub fn cleanup(&mut self) {
+        if self.compiled_executable.is_some() {
+            self.executor.cleanup();
+            self.compiled_executable = None;
+        }
+    }
+
+    /// 判断单个测试用例（编译并运行）
     pub async fn judge_test(
         &self,
         source_file: &Path,
         test: &mut TestCase,
-        time_limit: Duration,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<()> {
         test.status = TestStatus::Running;
 
         // 编译代码
-        let executable = match self.executor.compile(source_file) {
+        let executable = match self.executor.compile(source_file, stop_signal.clone()) {
             Ok(exe) => exe,
             Err(e) => {
                 test.status = TestStatus::CompilationError;
@@ -38,7 +93,7 @@ impl Judge {
         // 执行代码
         let result = self
             .executor
-            .execute(&executable, &test.input, time_limit)?;
+            .execute(&executable, &test.input, stop_signal)?;
 
         // 更新测试结果
         self.update_test_from_result(test, result);
@@ -108,13 +163,14 @@ impl Judge {
         &self,
         source_file: &Path,
         tests: &mut [TestCase],
-        time_limit: Duration,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<JudgeStatistics> {
         let mut stats = JudgeStatistics::default();
         stats.total = tests.len();
 
         for test in tests.iter_mut() {
-            self.judge_test(source_file, test, time_limit).await?;
+            self.judge_test(source_file, test, stop_signal.clone())
+                .await?;
 
             match test.status {
                 TestStatus::Accepted => stats.passed += 1,

@@ -5,6 +5,8 @@ use crate::models::{Problem, TestCase, TestStatus};
 use crate::ui::{TestPanel, Toolbar};
 use eframe::egui;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 use uuid::Uuid;
@@ -53,6 +55,9 @@ pub struct CPKitApp {
     tx: Sender<AppMessage>,
     rx: Receiver<AppMessage>,
 
+    // 停止信号
+    stop_signal: Arc<AtomicBool>,
+
     // 刷新标志
     frame_count: u64,
 }
@@ -81,6 +86,7 @@ impl CPKitApp {
             pending_select_file: false,
             tx: tx.clone(),
             rx,
+            stop_signal: Arc::new(AtomicBool::new(false)),
             frame_count: 0,
         };
 
@@ -197,25 +203,6 @@ impl CPKitApp {
             }
         }
 
-        // 方法2: 使用项目内嵌的字体文件
-        // 取消下面注释并将字体文件放到 fonts 目录
-        /*
-        if let Ok(font_data) = std::fs::read("fonts/SourceHanSansSC-Regular.otf") {
-            fonts.font_data.insert(
-                "source_han_sans".to_owned(),
-                egui::FontData::from_owned(font_data),
-            );
-            fonts.families
-                .entry(egui::FontFamily::Proportional)
-                .or_default()
-                .insert(0, "source_han_sans".to_owned());
-            fonts.families
-                .entry(egui::FontFamily::Monospace)
-                .or_default()
-                .insert(0, "source_han_sans".to_owned());
-        }
-        */
-
         ctx.set_fonts(fonts);
     }
 
@@ -303,19 +290,19 @@ impl CPKitApp {
 
         let store = self.problem_store.clone();
         let tx = self.tx.clone();
+        let stop_signal = self.stop_signal.clone();
 
         self.is_running = true;
         self.last_error = None;
+        self.stop_signal.store(false, Ordering::Relaxed);
 
         tokio::spawn(async move {
-            let time_limit;
             let problem_id;
             let test_count;
 
             {
                 let mut store_lock = store.lock().await;
                 if let Some(problem) = store_lock.get_current_problem_mut() {
-                    time_limit = Duration::from_millis(problem.time_limit);
                     problem_id = problem.id;
                     test_count = problem.tests.len();
 
@@ -330,29 +317,74 @@ impl CPKitApp {
             }
 
             match Judge::new() {
-                Ok(judge) => {
-                    // 逐个运行测试
-                    for i in 0..test_count {
-                        {
-                            let mut store_lock = store.lock().await;
-                            if let Some(problem) = store_lock.get_current_problem_mut() {
-                                if let Err(e) = judge
-                                    .judge_test(&source_path, &mut problem.tests[i], time_limit)
-                                    .await
-                                {
-                                    tracing::error!("测试执行失败: {}", e);
-                                    problem.tests[i].status = TestStatus::RuntimeError;
-                                    problem.tests[i].error_message =
-                                        Some(format!("执行错误: {}", e));
+                Ok(mut judge) => {
+                    // 检查停止信号
+                    if stop_signal.load(Ordering::Relaxed) {
+                        let _ = tx.send(AppMessage::RunCompleted);
+                        return;
+                    }
+
+                    // 先编译
+                    match judge.compile_once(&source_path, Some(stop_signal.clone())) {
+                        Ok(_) => {
+                            // 编译成功，逐个运行测试
+                            for i in 0..test_count {
+                                // 检查停止信号
+                                if stop_signal.load(Ordering::Relaxed) {
+                                    tracing::info!("测试运行被用户中断");
+                                    break;
                                 }
 
-                                // 克隆测试数据
-                                let tests_clone = problem.tests.clone();
+                                {
+                                    let mut store_lock = store.lock().await;
+                                    if let Some(problem) = store_lock.get_current_problem_mut() {
+                                        if let Err(e) = judge
+                                            .run_test(
+                                                &mut problem.tests[i],
+                                                Some(stop_signal.clone()),
+                                            )
+                                            .await
+                                        {
+                                            tracing::error!("测试执行失败: {}", e);
+                                            problem.tests[i].status = TestStatus::RuntimeError;
+                                            problem.tests[i].error_message =
+                                                Some(format!("执行错误: {}", e));
+                                        }
 
-                                // 保存更新
+                                        // 克隆测试数据
+                                        let tests_clone = problem.tests.clone();
+
+                                        // 保存更新
+                                        let _ = store_lock.update_current_problem();
+
+                                        // 发送更新消息
+                                        let source_file = store_lock
+                                            .get_current_problem()
+                                            .and_then(|p| p.source_file.clone());
+                                        let _ = tx.send(AppMessage::CurrentProblemChanged(
+                                            Some(problem_id),
+                                            tests_clone,
+                                            source_file,
+                                        ));
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+                            // 所有测试运行完毕，清理编译产物
+                            judge.cleanup();
+                        }
+                        Err(e) => {
+                            // 编译失败，所有测试标记为编译错误
+                            let mut store_lock = store.lock().await;
+                            if let Some(problem) = store_lock.get_current_problem_mut() {
+                                for test in problem.tests.iter_mut() {
+                                    test.status = TestStatus::CompilationError;
+                                    test.error_message = Some(format!("编译失败: {}", e));
+                                }
+
+                                let tests_clone = problem.tests.clone();
                                 let _ = store_lock.update_current_problem();
 
-                                // 发送更新消息
                                 let source_file = store_lock
                                     .get_current_problem()
                                     .and_then(|p| p.source_file.clone());
@@ -363,7 +395,6 @@ impl CPKitApp {
                                 ));
                             }
                         }
-                        ctx.request_repaint();
                     }
                 }
                 Err(e) => {
@@ -392,19 +423,19 @@ impl CPKitApp {
 
         let store = self.problem_store.clone();
         let tx = self.tx.clone();
+        let stop_signal = self.stop_signal.clone();
 
         self.is_running = true;
         self.last_error = None;
+        self.stop_signal.store(false, Ordering::Relaxed);
 
         tokio::spawn(async move {
-            let time_limit;
             let problem_id;
             let test_index;
 
             {
                 let mut store_lock = store.lock().await;
                 if let Some(problem) = store_lock.get_current_problem_mut() {
-                    time_limit = Duration::from_millis(problem.time_limit);
                     problem_id = problem.id;
 
                     if let Some(idx) = problem.tests.iter().position(|t| t.id == test_id) {
@@ -421,33 +452,71 @@ impl CPKitApp {
             }
 
             match Judge::new() {
-                Ok(judge) => {
-                    let mut store_lock = store.lock().await;
-                    if let Some(problem) = store_lock.get_current_problem_mut() {
-                        if let Err(e) = judge
-                            .judge_test(&source_path, &mut problem.tests[test_index], time_limit)
-                            .await
-                        {
-                            tracing::error!("测试执行失败: {}", e);
-                            problem.tests[test_index].status = TestStatus::RuntimeError;
-                            problem.tests[test_index].error_message =
-                                Some(format!("执行错误: {}", e));
+                Ok(mut judge) => {
+                    // 检查停止信号
+                    if stop_signal.load(Ordering::Relaxed) {
+                        let _ = tx.send(AppMessage::RunCompleted);
+                        return;
+                    }
+
+                    // 先编译
+                    match judge.compile_once(&source_path, Some(stop_signal.clone())) {
+                        Ok(_) => {
+                            // 编译成功，运行测试
+                            let mut store_lock = store.lock().await;
+                            if let Some(problem) = store_lock.get_current_problem_mut() {
+                                if let Err(e) = judge
+                                    .run_test(
+                                        &mut problem.tests[test_index],
+                                        Some(stop_signal.clone()),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!("测试执行失败: {}", e);
+                                    problem.tests[test_index].status = TestStatus::RuntimeError;
+                                    problem.tests[test_index].error_message =
+                                        Some(format!("执行错误: {}", e));
+                                }
+
+                                // 克隆测试数据
+                                let tests_clone = problem.tests.clone();
+
+                                let _ = store_lock.update_current_problem();
+
+                                // 测试完成后立即发送更新消息
+                                let source_file = store_lock
+                                    .get_current_problem()
+                                    .and_then(|p| p.source_file.clone());
+                                let _ = tx.send(AppMessage::CurrentProblemChanged(
+                                    Some(problem_id),
+                                    tests_clone,
+                                    source_file,
+                                ));
+                            }
+                            // 清理编译产物
+                            judge.cleanup();
                         }
+                        Err(e) => {
+                            // 编译失败
+                            let mut store_lock = store.lock().await;
+                            if let Some(problem) = store_lock.get_current_problem_mut() {
+                                problem.tests[test_index].status = TestStatus::CompilationError;
+                                problem.tests[test_index].error_message =
+                                    Some(format!("编译失败: {}", e));
 
-                        // 克隆测试数据
-                        let tests_clone = problem.tests.clone();
+                                let tests_clone = problem.tests.clone();
+                                let _ = store_lock.update_current_problem();
 
-                        let _ = store_lock.update_current_problem();
-
-                        // 测试完成后立即发送更新消息
-                        let source_file = store_lock
-                            .get_current_problem()
-                            .and_then(|p| p.source_file.clone());
-                        let _ = tx.send(AppMessage::CurrentProblemChanged(
-                            Some(problem_id),
-                            tests_clone,
-                            source_file,
-                        ));
+                                let source_file = store_lock
+                                    .get_current_problem()
+                                    .and_then(|p| p.source_file.clone());
+                                let _ = tx.send(AppMessage::CurrentProblemChanged(
+                                    Some(problem_id),
+                                    tests_clone,
+                                    source_file,
+                                ));
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -708,6 +777,7 @@ impl eframe::App for CPKitApp {
 
         if self.pending_stop {
             self.pending_stop = false;
+            self.stop_signal.store(true, Ordering::Relaxed);
             self.is_running = false;
         }
 
