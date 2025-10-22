@@ -1,4 +1,3 @@
-use crate::models::Language;
 use egui::{Button, Color32, RichText, Ui};
 
 /// 工具栏面板
@@ -8,12 +7,12 @@ impl Toolbar {
     /// 渲染工具栏
     pub fn ui(
         ui: &mut Ui,
-        current_language: &mut Language,
         source_file: &mut String,
         on_run_all: &mut bool,
         on_stop: &mut bool,
         on_add_test: &mut bool,
         on_clear_results: &mut bool,
+        on_open_file: &mut bool,
         has_problem: bool,
         is_running: bool,
     ) {
@@ -35,34 +34,32 @@ impl Toolbar {
 
             ui.add_space(4.0);
 
-            // 第二行：语言选择和源文件
+            // 第二行：源文件
             ui.horizontal(|ui| {
-                ui.label("Language:");
-                egui::ComboBox::from_id_source("language_selector")
-                    .selected_text(current_language.display_name())
-                    .show_ui(ui, |ui| {
-                        for lang in Language::all() {
-                            ui.selectable_value(current_language, *lang, lang.display_name());
-                        }
-                    });
-
-                ui.separator();
-
-                ui.label("Source:");
+                ui.label("Source File:");
                 ui.add(
                     egui::TextEdit::singleline(source_file)
-                        .desired_width(ui.available_width() - 80.0)
-                        .hint_text("Enter source file path..."),
+                        .desired_width(ui.available_width() - 180.0)
+                        .hint_text("接收题目后自动生成...")
+                        .interactive(false),
                 );
 
-                if ui.button("📁").on_hover_text("Browse...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Code Files", &["cpp", "rs", "py", "java", "c"])
-                        .pick_file()
-                    {
-                        *source_file = path.display().to_string();
-                    }
-                }
+                // 打开/创建文件按钮
+                ui.add_enabled_ui(
+                    has_problem && !source_file.is_empty() && !is_running,
+                    |ui| {
+                        if ui
+                            .add(
+                                Button::new(RichText::new("📝 打开文件").color(Color32::WHITE))
+                                    .fill(Color32::from_rgb(0, 150, 100)),
+                            )
+                            .on_hover_text("创建并用 Zed 打开源文件")
+                            .clicked()
+                        {
+                            *on_open_file = true;
+                        }
+                    },
+                );
             });
 
             ui.add_space(4.0);

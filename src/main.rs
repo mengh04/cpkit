@@ -8,7 +8,6 @@ mod ui;
 
 use anyhow::Result;
 use eframe::egui;
-use std::env;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing_subscriber;
@@ -19,14 +18,6 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
-
-    // Parse command line arguments
-    let args: Vec<String> = env::args().collect();
-    let source_file = if args.len() > 1 {
-        Some(args[1].clone())
-    } else {
-        None
-    };
 
     // Create shared problem state
     let problem_store = Arc::new(Mutex::new(storage::ProblemStore::new()?));
@@ -50,7 +41,7 @@ async fn main() -> Result<()> {
     eframe::run_native(
         "CPKit",
         native_options,
-        Box::new(move |cc| Ok(Box::new(app::CPKitApp::new(cc, problem_store, source_file)))),
+        Box::new(move |cc| Ok(Box::new(app::CPKitApp::new(cc, problem_store)))),
     )
     .map_err(|e| anyhow::anyhow!("GUI error: {}", e))?;
 

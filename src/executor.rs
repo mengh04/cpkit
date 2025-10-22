@@ -1,36 +1,21 @@
-use crate::models::{ExecutionResult, Language};
+use crate::models::ExecutionResult;
 use anyhow::{Context, Result};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 代码执行器
-pub struct Executor {
-    #[allow(dead_code)]
-    work_dir: std::path::PathBuf,
-}
+/// 代码执行器（仅支持 C++）
+pub struct Executor;
 
 impl Executor {
     pub fn new() -> Result<Self> {
-        let work_dir = std::env::current_dir()?;
-        Ok(Self { work_dir })
+        Ok(Self)
     }
 
-    /// 编译源代码
-    pub fn compile(&self, source_file: &Path, language: Language) -> Result<std::path::PathBuf> {
-        match language {
-            Language::Cpp => self.compile_cpp(source_file),
-            Language::Rust => self.compile_rust(source_file),
-            Language::C => self.compile_c(source_file),
-            Language::Java => self.compile_java(source_file),
-            Language::Python => Ok(source_file.to_path_buf()), // Python 不需要编译
-        }
-    }
-
-    /// 编译 C++ 代码
-    fn compile_cpp(&self, source_file: &Path) -> Result<std::path::PathBuf> {
-        let output_file = source_file.with_extension("exe");
+    /// 编译 C++ 代码，输出为 a.exe
+    pub fn compile(&self, source_file: &Path) -> Result<PathBuf> {
+        let output_file = PathBuf::from("a.exe");
 
         // 尝试查找编译器
         let compiler = self.find_cpp_compiler()?;
@@ -39,7 +24,7 @@ impl Executor {
             .args(&[
                 source_file.to_str().unwrap(),
                 "-o",
-                output_file.to_str().unwrap(),
+                "a.exe",
                 "-O2",
                 "-std=c++17",
                 "-Wall",
@@ -56,115 +41,24 @@ impl Executor {
         Ok(output_file)
     }
 
-    /// 编译 C 代码
-    fn compile_c(&self, source_file: &Path) -> Result<std::path::PathBuf> {
-        let output_file = source_file.with_extension("exe");
-
-        let compiler = self.find_c_compiler()?;
-
-        let status = Command::new(compiler)
-            .args(&[
-                source_file.to_str().unwrap(),
-                "-o",
-                output_file.to_str().unwrap(),
-                "-O2",
-                "-std=c11",
-                "-Wall",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()
-            .context("Cannot execute C compiler")?;
-
-        if !status.success() {
-            anyhow::bail!("C compilation failed");
-        }
-
-        Ok(output_file)
-    }
-
-    /// 编译 Rust 代码
-    fn compile_rust(&self, source_file: &Path) -> Result<std::path::PathBuf> {
-        let output_file = source_file.with_extension("exe");
-
-        let status = Command::new("rustc")
-            .args(&[
-                source_file.to_str().unwrap(),
-                "-o",
-                output_file.to_str().unwrap(),
-                "-O",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()
-            .context("Cannot execute Rust compiler")?;
-
-        if !status.success() {
-            anyhow::bail!("Rust compilation failed");
-        }
-
-        Ok(output_file)
-    }
-
-    /// 编译 Java 代码
-    fn compile_java(&self, source_file: &Path) -> Result<std::path::PathBuf> {
-        let status = Command::new("javac")
-            .arg(source_file.to_str().unwrap())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()
-            .context("Cannot execute Java compiler")?;
-
-        if !status.success() {
-            anyhow::bail!("Java compilation failed");
-        }
-
-        // Java 返回 class 文件路径
-        Ok(source_file.with_extension("class"))
-    }
-
     /// 执行程序
     pub fn execute(
         &self,
         executable: &Path,
         input: &str,
-        language: Language,
         time_limit: Duration,
     ) -> Result<ExecutionResult> {
         let start = Instant::now();
 
-        let mut child = match language {
-            Language::Python => Command::new("python")
-                .arg(executable)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .context("Cannot start Python interpreter")?,
-            Language::Java => {
-                let class_name = executable
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .context("Invalid Java class name")?;
+        // 在 Windows 上使用绝对路径
+        let exe_path = std::env::current_dir()?.join(executable);
 
-                let dir = executable.parent().context("Cannot get directory")?;
-
-                Command::new("java")
-                    .current_dir(dir)
-                    .arg(class_name)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .context("Cannot start Java Virtual Machine")?
-            }
-            _ => Command::new(executable)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .context("Cannot start program")?,
-        };
+        let mut child = Command::new(&exe_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context(format!("Cannot start program: {:?}", exe_path))?;
 
         // 写入输入
         if let Some(mut stdin) = child.stdin.take() {
@@ -218,23 +112,12 @@ impl Executor {
         anyhow::bail!("C++ compiler not found (g++, clang++, cl)")
     }
 
-    /// Find C compiler
-    fn find_c_compiler(&self) -> Result<String> {
-        // Try common C compilers
-        for compiler in &["gcc", "clang", "cl"] {
-            if which::which(compiler).is_ok() {
-                return Ok(compiler.to_string());
-            }
-        }
-        anyhow::bail!("C compiler not found (gcc, clang, cl)")
-    }
-
-    /// Clean up build artifacts
-    pub fn cleanup(&self, files: &[std::path::PathBuf]) {
-        for file in files {
-            if file.exists() {
-                let _ = std::fs::remove_file(file);
-            }
+    /// 清理 a.exe
+    pub fn cleanup(&self) {
+        let exe_path = PathBuf::from("a.exe");
+        if exe_path.exists() {
+            let _ = std::fs::remove_file(exe_path);
+            tracing::info!("已删除临时文件 a.exe");
         }
     }
 }

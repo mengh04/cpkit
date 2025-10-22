@@ -133,52 +133,19 @@ impl TestStatus {
     }
 }
 
-/// 编程语言
+/// 编程语言（仅支持 C++）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Language {
     Cpp,
-    Rust,
-    Python,
-    Java,
-    C,
 }
 
 impl Language {
-    #[allow(dead_code)]
-    pub fn file_extension(&self) -> &str {
-        match self {
-            Language::Cpp => "cpp",
-            Language::Rust => "rs",
-            Language::Python => "py",
-            Language::Java => "java",
-            Language::C => "c",
-        }
-    }
-
-    pub fn display_name(&self) -> &str {
-        match self {
-            Language::Cpp => "C++",
-            Language::Rust => "Rust",
-            Language::Python => "Python",
-            Language::Java => "Java",
-            Language::C => "C",
-        }
-    }
-
-    pub fn all() -> &'static [Language] {
-        &[
-            Language::Cpp,
-            Language::Rust,
-            Language::Python,
-            Language::Java,
-            Language::C,
-        ]
-    }
+    // Language 仅用于序列化，所有方法已移除
 }
 
 impl std::fmt::Display for Language {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.display_name())
+        write!(f, "C++")
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::executor::Executor;
-use crate::models::{ExecutionResult, Language, TestCase, TestStatus};
+use crate::models::{ExecutionResult, TestCase, TestStatus};
 use anyhow::Result;
 use std::path::Path;
 use std::time::Duration;
@@ -20,14 +20,13 @@ impl Judge {
     pub async fn judge_test(
         &self,
         source_file: &Path,
-        language: Language,
         test: &mut TestCase,
         time_limit: Duration,
     ) -> Result<()> {
         test.status = TestStatus::Running;
 
         // 编译代码
-        let executable = match self.executor.compile(source_file, language) {
+        let executable = match self.executor.compile(source_file) {
             Ok(exe) => exe,
             Err(e) => {
                 test.status = TestStatus::CompilationError;
@@ -39,15 +38,13 @@ impl Judge {
         // 执行代码
         let result = self
             .executor
-            .execute(&executable, &test.input, language, time_limit)?;
+            .execute(&executable, &test.input, time_limit)?;
 
         // 更新测试结果
         self.update_test_from_result(test, result);
 
-        // 清理编译产物
-        if language != Language::Python {
-            self.executor.cleanup(&[executable]);
-        }
+        // 清理编译产物 a.exe
+        self.executor.cleanup();
 
         Ok(())
     }
@@ -110,7 +107,6 @@ impl Judge {
     pub async fn judge_all_tests(
         &self,
         source_file: &Path,
-        language: Language,
         tests: &mut [TestCase],
         time_limit: Duration,
     ) -> Result<JudgeStatistics> {
@@ -118,8 +114,7 @@ impl Judge {
         stats.total = tests.len();
 
         for test in tests.iter_mut() {
-            self.judge_test(source_file, language, test, time_limit)
-                .await?;
+            self.judge_test(source_file, test, time_limit).await?;
 
             match test.status {
                 TestStatus::Accepted => stats.passed += 1,

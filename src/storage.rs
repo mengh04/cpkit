@@ -1,8 +1,8 @@
-use crate::models::{Problem, TestCase};
+use crate::models::Problem;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// 问题存储管理器
@@ -146,83 +146,6 @@ impl ProblemStore {
         for id in ids {
             self.delete_problem(id)?;
         }
-        Ok(())
-    }
-
-    /// 获取源文件对应的测试点保存路径
-    /// 例如: /path/to/solution.cpp -> /path/to/.cpkit/solution.cpp.json
-    fn get_source_file_tests_path(source_file: &Path) -> Result<PathBuf> {
-        tracing::debug!("获取测试点路径，源文件: {:?}", source_file);
-
-        // 处理相对路径和绝对路径
-        let parent = if let Some(p) = source_file.parent() {
-            if p.as_os_str().is_empty() {
-                // 相对路径，使用当前目录
-                PathBuf::from(".")
-            } else {
-                p.to_path_buf()
-            }
-        } else {
-            // 没有父目录，使用当前目录
-            PathBuf::from(".")
-        };
-        tracing::debug!("父目录: {:?}", parent);
-
-        let filename = source_file
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("Invalid source file name"))?
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 in filename"))?;
-        tracing::debug!("文件名: {}", filename);
-
-        let cpkit_dir = parent.join(".cpkit");
-        tracing::debug!("创建目录: {:?}", cpkit_dir);
-        fs::create_dir_all(&cpkit_dir)?;
-
-        let tests_path = cpkit_dir.join(format!("{}.json", filename));
-        tracing::debug!("最终路径: {:?}", tests_path);
-
-        Ok(tests_path)
-    }
-
-    /// 从源文件路径加载测试点
-    pub fn load_tests_from_source_file(source_file: &Path) -> Result<Vec<TestCase>> {
-        let tests_path = Self::get_source_file_tests_path(source_file)?;
-
-        if !tests_path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let json = fs::read_to_string(&tests_path)?;
-        let tests: Vec<TestCase> = serde_json::from_str(&json)?;
-        Ok(tests)
-    }
-
-    /// 保存测试点到源文件对应的路径
-    pub fn save_tests_to_source_file(source_file: &Path, tests: &[TestCase]) -> Result<()> {
-        tracing::info!(
-            "开始保存测试点，源文件: {:?}, 测试点数量: {}",
-            source_file,
-            tests.len()
-        );
-
-        let tests_path = Self::get_source_file_tests_path(source_file)?;
-        tracing::info!("测试点保存路径: {:?}", tests_path);
-
-        let json = serde_json::to_string_pretty(tests)?;
-        tracing::info!("JSON 序列化成功，大小: {} bytes", json.len());
-
-        fs::write(&tests_path, json)?;
-        tracing::info!("成功写入文件: {:?}", tests_path);
-
-        // 验证文件是否真的存在
-        if tests_path.exists() {
-            let file_size = fs::metadata(&tests_path)?.len();
-            tracing::info!("文件验证成功，大小: {} bytes", file_size);
-        } else {
-            tracing::error!("警告：文件写入后不存在！");
-        }
-
         Ok(())
     }
 }
