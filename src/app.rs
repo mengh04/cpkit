@@ -1,6 +1,6 @@
 use crate::competitive_companion::SharedProblemStore;
 use crate::judge::Judge;
-use crate::models::{TestCase, TestStatus};
+use crate::models::{Problem, TestCase, TestStatus};
 
 use crate::ui::{TestPanel, Toolbar};
 use eframe::egui;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 enum AppMessage {
     ProblemsUpdated(Vec<ProblemData>),
-    CurrentProblemChanged(Option<Uuid>, Vec<TestCase>),
+    CurrentProblemChanged(Option<Uuid>, Vec<TestCase>, Option<String>),
     RunCompleted,
 }
 
@@ -47,6 +47,7 @@ pub struct CPKitApp {
     pending_stop: bool,
     pending_add_test: bool,
     pending_open_file: bool,
+    pending_select_file: bool,
 
     // 消息通道
     tx: Sender<AppMessage>,
@@ -77,6 +78,7 @@ impl CPKitApp {
             pending_stop: false,
             pending_add_test: false,
             pending_open_file: false,
+            pending_select_file: false,
             tx: tx.clone(),
             rx,
             frame_count: 0,
@@ -106,11 +108,18 @@ impl CPKitApp {
                     .get_current_problem()
                     .map(|p| p.tests.clone())
                     .unwrap_or_default();
+                let source_file = store_lock
+                    .get_current_problem()
+                    .and_then(|p| p.source_file.clone());
 
                 drop(store_lock);
 
                 let _ = tx_clone.send(AppMessage::ProblemsUpdated(problems));
-                let _ = tx_clone.send(AppMessage::CurrentProblemChanged(current_id, tests));
+                let _ = tx_clone.send(AppMessage::CurrentProblemChanged(
+                    current_id,
+                    tests,
+                    source_file,
+                ));
             }
         });
 
@@ -229,30 +238,41 @@ impl CPKitApp {
                 AppMessage::ProblemsUpdated(problems) => {
                     self.cached_problems = problems;
                 }
-                AppMessage::CurrentProblemChanged(id, tests) => {
+                AppMessage::CurrentProblemChanged(id, tests, problem_source_file) => {
                     let problem_changed = id != self.cached_current_id;
                     self.cached_current_id = id;
                     self.cached_tests = tests;
 
-                    // 当接收到新题目时，自动设置source_file为题目名.cpp并打开文件
+                    // 当接收到新题目时，处理源文件
                     if problem_changed && id.is_some() {
-                        if let Some(problem) =
-                            self.cached_problems.iter().find(|p| Some(p.id) == id)
-                        {
-                            // 生成安全的文件名（移除特殊字符）
-                            let safe_name = problem
-                                .name
-                                .chars()
-                                .map(|c| match c {
-                                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-                                    _ => c,
-                                })
-                                .collect::<String>();
-                            self.source_file = format!("{}.cpp", safe_name);
-                            tracing::info!("新题目接收，自动设置源文件为: {}", self.source_file);
+                        if let Some(saved_source) = problem_source_file {
+                            // 情况1: problem 中已保存源文件路径（手动选择的文件）
+                            self.source_file = saved_source;
+                            tracing::info!("从问题中恢复源文件: {}", self.source_file);
+                            // 不触发自动打开，因为是用户手动选择的
+                        } else {
+                            // 情况2: problem 中没有源文件（Competitive Companion 接收的题目）
+                            if let Some(problem) =
+                                self.cached_problems.iter().find(|p| Some(p.id) == id)
+                            {
+                                // 生成安全的文件名（移除特殊字符）
+                                let safe_name = problem
+                                    .name
+                                    .chars()
+                                    .map(|c| match c {
+                                        '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                                        _ => c,
+                                    })
+                                    .collect::<String>();
+                                self.source_file = format!("{}.cpp", safe_name);
+                                tracing::info!(
+                                    "新题目接收，自动设置源文件为: {}",
+                                    self.source_file
+                                );
 
-                            // 自动创建并打开文件
-                            self.pending_open_file = true;
+                                // 自动创建并打开文件
+                                self.pending_open_file = true;
+                            }
                         }
                     }
 
@@ -333,9 +353,13 @@ impl CPKitApp {
                                 let _ = store_lock.update_current_problem();
 
                                 // 发送更新消息
+                                let source_file = store_lock
+                                    .get_current_problem()
+                                    .and_then(|p| p.source_file.clone());
                                 let _ = tx.send(AppMessage::CurrentProblemChanged(
                                     Some(problem_id),
                                     tests_clone,
+                                    source_file,
                                 ));
                             }
                         }
@@ -416,9 +440,13 @@ impl CPKitApp {
                         let _ = store_lock.update_current_problem();
 
                         // 测试完成后立即发送更新消息
+                        let source_file = store_lock
+                            .get_current_problem()
+                            .and_then(|p| p.source_file.clone());
                         let _ = tx.send(AppMessage::CurrentProblemChanged(
                             Some(problem_id),
                             tests_clone,
+                            source_file,
                         ));
                     }
                 }
@@ -469,6 +497,50 @@ impl CPKitApp {
         }
     }
 
+    /// 选择已存在的源文件
+    fn select_file(&mut self) {
+        // 使用文件对话框让用户选择文件
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("C++ Source", &["cpp", "cc", "cxx"])
+            .add_filter("C Source", &["c"])
+            .add_filter("Rust Source", &["rs"])
+            .add_filter("Python Source", &["py"])
+            .add_filter("Java Source", &["java"])
+            .add_filter("All Files", &["*"])
+            .pick_file()
+        {
+            if let Some(path_str) = path.to_str() {
+                self.source_file = path_str.to_string();
+                tracing::info!("选择文件: {}", self.source_file);
+                self.last_error = None;
+
+                // 创建一个临时 problem，这样所有逻辑都可以统一
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Manual Test");
+
+                let store = self.problem_store.clone();
+                let name = file_name.to_string();
+                let source = self.source_file.clone();
+
+                // 异步创建 problem
+                tokio::spawn(async move {
+                    let mut store_lock = store.lock().await;
+
+                    // 创建临时 problem
+                    let mut problem = Problem::new(name, "Manual".to_string(), "".to_string());
+                    problem.source_file = Some(source);
+
+                    // 添加到 store 并设为当前问题
+                    let _ = store_lock.add_problem(problem);
+                });
+            } else {
+                self.last_error = Some("无效的文件路径".to_string());
+            }
+        }
+    }
+
     /// 渲染主界面
     fn render_ui(&mut self, ctx: &egui::Context) {
         // 顶部工具栏
@@ -479,7 +551,7 @@ impl CPKitApp {
             let mut stop = false;
             let mut add_test = false;
             let mut clear_results = false;
-            let mut open_file = false;
+            let mut select_file = false;
 
             let has_problem = self.cached_current_id.is_some();
 
@@ -490,7 +562,7 @@ impl CPKitApp {
                 &mut stop,
                 &mut add_test,
                 &mut clear_results,
-                &mut open_file,
+                &mut select_file,
                 has_problem,
                 self.is_running,
             );
@@ -504,8 +576,8 @@ impl CPKitApp {
             if add_test {
                 self.pending_add_test = true;
             }
-            if open_file {
-                self.pending_open_file = true;
+            if select_file {
+                self.pending_select_file = true;
             }
 
             // 处理清除结果
@@ -643,6 +715,12 @@ impl eframe::App for CPKitApp {
         if self.pending_open_file {
             self.pending_open_file = false;
             self.create_and_open_file();
+        }
+
+        // 处理选择文件请求
+        if self.pending_select_file {
+            self.pending_select_file = false;
+            self.select_file();
         }
 
         // 渲染 UI

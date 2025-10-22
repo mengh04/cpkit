@@ -26,7 +26,7 @@ impl Executor {
                 "-o",
                 "a.exe",
                 "-O2",
-                "-std=c++17",
+                "-std=c++20",
                 "-Wall",
             ])
             .stdout(Stdio::piped())
