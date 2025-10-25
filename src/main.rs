@@ -1,23 +1,89 @@
 use gpui::*;
 use gpui_component::{
+    button::Button,
     input::{InputState, TextInput},
+    label::Label,
     *,
 };
 
 struct HelloWorld {
-    input: Entity<InputState>,
+    test_case_panels: Vec<Entity<TestCasePanel>>,
 }
 
 impl HelloWorld {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx));
-        Self { input }
+    fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
+        let test_case_panels: Vec<Entity<TestCasePanel>> = vec![];
+
+        Self { test_case_panels }
     }
 }
 
 impl Render for HelloWorld {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .size_full()
+            .gap_4()
+            .child(
+                Button::new("my-button")
+                    .label("添加测试样例")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.test_case_panels
+                            .push(cx.new(|cx| TestCasePanel::new(window, cx)));
+                    })),
+            )
+            .child(
+                div()
+                    .id("test-cases-container")
+                    .flex_1()
+                    .scrollable(Axis::Vertical)
+                    .children(self.test_case_panels.iter_mut().map(|panel| panel.clone())),
+            )
+    }
+}
+
+struct TestCasePanel {
+    stdin_input: Entity<InputState>,
+    stdout_input: Entity<InputState>,
+    expected_input: Entity<InputState>,
+    stderr_input: Entity<InputState>,
+}
+
+impl TestCasePanel {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let stdin_input = cx.new(|cx| InputState::new(window, cx));
+        let stdout_input = cx.new(|cx| InputState::new(window, cx));
+        let expected_input = cx.new(|cx| InputState::new(window, cx));
+        let stderr_input = cx.new(|cx| InputState::new(window, cx));
+
+        Self {
+            stdin_input,
+            stdout_input,
+            expected_input,
+            stderr_input,
+        }
+    }
+}
+
+impl Render for TestCasePanel {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex().child(TextInput::new(&self.input))
+        v_flex().gap_2().p_4().children([
+            Label::new("标准输入 (stdin):").into_any_element(),
+            TextInput::new(&self.stdin_input)
+                .w_full()
+                .into_any_element(),
+            Label::new("标准输出 (stdout):").into_any_element(),
+            TextInput::new(&self.stdout_input)
+                .w_full()
+                .into_any_element(),
+            Label::new("期望输出 (expected):").into_any_element(),
+            TextInput::new(&self.expected_input)
+                .w_full()
+                .into_any_element(),
+            Label::new("错误输出 (stderr):").into_any_element(),
+            TextInput::new(&self.stderr_input)
+                .w_full()
+                .into_any_element(),
+        ])
     }
 }
 
