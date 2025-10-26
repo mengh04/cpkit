@@ -43,23 +43,22 @@ impl Render for HelloWorld {
 
 struct TestCasePanel {
     stdin_input: Entity<InputState>,
-    stdout_input: Entity<InputState>,
     expected_input: Entity<InputState>,
-    stderr_input: Entity<InputState>,
 }
 
 impl TestCasePanel {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let stdin_input = cx.new(|cx| InputState::new(window, cx));
-        let stdout_input = cx.new(|cx| InputState::new(window, cx));
-        let expected_input = cx.new(|cx| InputState::new(window, cx));
-        let stderr_input = cx.new(|cx| InputState::new(window, cx));
+        let mut create_input = || {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .auto_grow(1, 10)
+                    .soft_wrap(false)
+            })
+        };
 
         Self {
-            stdin_input,
-            stdout_input,
-            expected_input,
-            stderr_input,
+            stdin_input: create_input(),
+            expected_input: create_input(),
         }
     }
 }
@@ -71,16 +70,8 @@ impl Render for TestCasePanel {
             TextInput::new(&self.stdin_input)
                 .w_full()
                 .into_any_element(),
-            Label::new("标准输出 (stdout):").into_any_element(),
-            TextInput::new(&self.stdout_input)
-                .w_full()
-                .into_any_element(),
             Label::new("期望输出 (expected):").into_any_element(),
             TextInput::new(&self.expected_input)
-                .w_full()
-                .into_any_element(),
-            Label::new("错误输出 (stderr):").into_any_element(),
-            TextInput::new(&self.stderr_input)
                 .w_full()
                 .into_any_element(),
         ])
