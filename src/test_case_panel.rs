@@ -1,43 +1,39 @@
 use gpui::*;
-use gpui_component::{
-    input::{InputState, TextInput},
-    label::Label,
-    *,
-};
+use gpui_component::{button::Button, *};
+
+use crate::test_case_card::TestCaseCard;
 
 pub struct TestCasePanel {
-    stdin_input: Entity<InputState>,
-    expected_input: Entity<InputState>,
+    test_case_cards: Vec<Entity<TestCaseCard>>,
 }
 
 impl TestCasePanel {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut create_input = || {
-            cx.new(|cx| {
-                InputState::new(window, cx)
-                    .auto_grow(1, 10)
-                    .soft_wrap(false)
-            })
-        };
+    pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
+        let test_case_cards: Vec<Entity<TestCaseCard>> = vec![];
 
-        Self {
-            stdin_input: create_input(),
-            expected_input: create_input(),
-        }
+        Self { test_case_cards }
     }
 }
 
 impl Render for TestCasePanel {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex().gap_2().p_4().children([
-            Label::new("标准输入 (stdin):").into_any_element(),
-            TextInput::new(&self.stdin_input)
-                .w_full()
-                .into_any_element(),
-            Label::new("期望输出 (expected):").into_any_element(),
-            TextInput::new(&self.expected_input)
-                .w_full()
-                .into_any_element(),
-        ])
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .size_full()
+            .gap_4()
+            .child(
+                Button::new("my-button")
+                    .label("添加测试样例")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.test_case_cards
+                            .push(cx.new(|cx| TestCaseCard::new(window, cx)));
+                    })),
+            )
+            .child(
+                div()
+                    .id("test-cases-container")
+                    .flex_1()
+                    .scrollable(Axis::Vertical)
+                    .children(self.test_case_cards.iter_mut().map(|panel| panel.clone())),
+            )
     }
 }
